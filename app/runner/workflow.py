@@ -13,6 +13,7 @@ from PIL import Image
 import pypdfium2 as pdfium
 from app.src.cloud_storage import CloudStorage
 from app.src.database import Database
+from app.src.utils.files import infer_content_type, infer_extension
 
 def main():
     # Load environment variables from .env file in the current directory
@@ -44,8 +45,8 @@ def main():
     img_path = BASE_DIR / "resources" / "sample_report.jpg"
     path = Path(img_path)
     report_id = str(uuid.uuid4())
-    filename = "file." + cloud_storage.infer_extension(img_path)
-    mime_type = cloud_storage.infer_content_type(filename)
+    filename = "file." + infer_extension(img_path)
+    mime_type = infer_content_type(filename)
     size_bytes = path.stat().st_size
 
 

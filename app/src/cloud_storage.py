@@ -1,8 +1,5 @@
 import boto3
 from botocore.client import Config
-import os
-import mimetypes
-from pathlib import Path
 
 class CloudStorage:
     def __init__(self, endpoint_url: str, aws_access_key_id: str, aws_secret_access_key: str, user_id: str, bucket_name: str):
@@ -35,26 +32,6 @@ class CloudStorage:
         )
         print(f"🔗 Presigned URL (valid {expires_in}s): {url}")
         return url
-    
-    @staticmethod
-    def infer_content_type(filename: str) -> str:
-        ctype, _ = mimetypes.guess_type(filename)
-        if ctype:
-            return ctype
-        ext = Path(filename).suffix.lower()
-        return {
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".png": "image/png",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-            ".pdf": "application/pdf",
-        }.get(ext, "application/octet-stream")
-
-    @staticmethod
-    def infer_extension(local_path: str) -> str:
-        ext = Path(local_path).suffix.lstrip(".") 
-        return ext
     
     def upload_report(self, local_path: str, report_id: str, filename: str, content_type: str) -> str:
         key = self.make_report_key(report_id, filename)
