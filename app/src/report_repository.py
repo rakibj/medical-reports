@@ -74,7 +74,7 @@ class ReportRepository:
     def get_context_from_embeddings(self,
     account_id: str,
     query: str,
-    report_id: Optional[str],
+    report_id: Optional[str] = None,
     *,
     k: int = 5,
     sim_threshold: float = 0.10,     # tweak: 0.30 (weak) · 0.50 (medium) · 0.70 (strong)

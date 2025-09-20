@@ -55,6 +55,6 @@ class ReportService:
         self.database.index_ocr_text(self.supabase_default_account_id, report_id, full_text)
         return report_id, url
 
-    def get_context(self, report_id: str, query: str):
-        context = self.database.get_context_from_embeddings(self.supabase_default_account_id,query,report_id)
+    def get_context(self, query: str):
+        context = self.database.get_context_from_embeddings(self.supabase_default_account_id,query)
         return context
