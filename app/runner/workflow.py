@@ -12,8 +12,9 @@ from pdf2image import convert_from_path
 from PIL import Image
 import pypdfium2 as pdfium
 from app.src.cloud_storage import CloudStorage
-from app.src.database import Database
+from app.src.report_repository import ReportRepository
 from app.src.utils.files import infer_content_type, infer_extension
+from app.src.ocr_processor import OCRProcessor
 
 def main():
     # Load environment variables from .env file in the current directory
@@ -39,7 +40,7 @@ def main():
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     supabase_default_account_id = os.getenv("SUPABASE_DEFAULT_ACCOUNT_ID")
 
-    database = Database(supabase_url, supabase_service_role_key)
+    database = ReportRepository(supabase_url, supabase_service_role_key)
     print("database initialized")
 
     img_path = BASE_DIR / "resources" / "sample_report.jpg"
@@ -49,12 +50,14 @@ def main():
     mime_type = infer_content_type(filename)
     size_bytes = path.stat().st_size
 
+    ocr_processor = OCRProcessor()
+    full_text = ocr_processor.ocr_file(path)
 
-    database.add_database_report(supabase_default_account_id, report_id, filename, mime_type, size_bytes)
-    cloud_storage.upload_report(str(img_path), report_id, filename, mime_type)
-    url = cloud_storage.get_presigned_url(report_id, filename)  
-    
-    print("Download from:", url)  
+    print("OCR complete. Text:", full_text)
+    #database.add_database_report(supabase_default_account_id, report_id, filename, mime_type, size_bytes)
+    #cloud_storage.upload_report(str(img_path), report_id, filename, mime_type)
+    #url = cloud_storage.get_presigned_url(report_id, filename)  
+    #print("Download from:", url)  
 
 
 

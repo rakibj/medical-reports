@@ -2,7 +2,7 @@ from supabase import create_client, Client
 from postgrest import APIError 
 import base64
 
-class Database:
+class ReportRepository:
     def __init__(self, db_url: str, service_role_key: str):
         # Initialize your database connection here
         supabase_url = db_url
