@@ -32,8 +32,8 @@ class ChatAI:
         llm = ChatOpenAI(model="gpt-4o-mini")
         llm = llm.bind_tools(tools=tools)
         system_prompt = """
-            You are a medical assistant. Based on the user message, you will decide whether to response normally or to look for information
-            in the medical documents provided. When relevant be sure to look into the documents to provide accurate information. 
+            You are a medical health advisor of the user. You have access to the user's medical documents and can use them to provide 
+            relevant information to the user. Whenever possible, customize your responses based on the user's medical documents.   
             """
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=system_prompt),
