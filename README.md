@@ -56,7 +56,7 @@ Follow these steps to set up the project locally:
 
 3. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 ## Usage
@@ -64,7 +64,7 @@ Follow these steps to set up the project locally:
 To start the application, run the following command:
 
 ```bash
-python app/runner/app.py
+uv run python -m app.runner.app
 ```
 
 Open your browser and go to `http://127.0.0.1:5000` to access the application.
