@@ -1,7 +1,8 @@
 from supabase import create_client, Client
 from postgrest import APIError 
 import base64
-from typing import List, Tuple, Dict, Optional
+import mimetypes  # ← NEW
+from typing import List, Tuple, Dict, Optional, Any
 from app.src.text_embedder import TextEmbedder
 
 class ReportRepository:
@@ -112,3 +113,64 @@ class ReportRepository:
             context = context[:max_total_chars] + " …"
         return context or "No relevant information found in the documents."
     
+    def list_reports(self, account_id: str) -> List[Dict[str, str]]:
+        """
+        Return all reports for the default account ordered from newest to oldest.
+        Each item has: id, created_at, filename.
+        """
+        try:
+            resp = (
+                self.client.table("reports")
+                .select("id,created_at,filename")
+                .eq("account_id", account_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            return resp.data or []
+        except APIError as e:
+            # surface a clean error; upstream caller can log/handle
+            raise RuntimeError(f"Failed to list reports: {getattr(e, 'message', str(e))}")
+
+    def get_presigned_url_for_report(
+            self,
+            account_id: str,
+            report_id: str,
+            storage: Any,               # pass in an instance of CloudStorage
+            *,
+            expires_in: int = 900
+        ) -> str:
+            """
+            Look up the report's MIME type, reconstruct the stored object name (file.<ext>),
+            and return a presigned URL via CloudStorage.get_presigned_url().
+
+            Args:
+                account_id: Owner of the report.
+                report_id: Report UUID.
+                storage: An initialized CloudStorage instance.
+                expires_in: URL TTL in seconds (default 900s).
+
+            Returns:
+                str: Presigned URL to download/view the original uploaded file.
+            """
+            try:
+                row = (
+                    self.client.table("reports")
+                    .select("mime_type")
+                    .eq("id", report_id)
+                    .eq("account_id", account_id)
+                    .single()
+                    .execute()
+                ).data
+            except APIError as e:
+                raise RuntimeError(f"DB error loading report: {getattr(e, 'message', str(e))}")
+
+            if not row:
+                raise RuntimeError(f"Report not found or not accessible: {report_id}")
+
+            mime_type = row.get("mime_type") or "application/octet-stream"
+            guessed_ext = mimetypes.guess_extension(mime_type) or ".bin"
+            ext = guessed_ext.lstrip(".")  # normalize like 'pdf', 'png', etc.
+
+            storage_filename = f"file.{ext}"
+            # delegate to CloudStorage (uses subfolder='source' by default)
+            return storage.get_presigned_url(report_id, storage_filename, expires_in=expires_in)
