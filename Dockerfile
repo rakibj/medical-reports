@@ -32,5 +32,5 @@ EXPOSE 8080
 # harmless default for local
 ENV PORT=8080  
 
-# Run server
-CMD ["uv", "run", "uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+# ✅ Use shell form so ${PORT} is expanded at runtime
+CMD ["/bin/sh", "-c", "uv run uvicorn app.api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
