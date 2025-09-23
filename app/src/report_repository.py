@@ -3,6 +3,7 @@ from postgrest import APIError
 import mimetypes 
 from typing import List, Tuple, Dict, Optional, Any
 from app.src.text_embedder import TextEmbedder
+from typing import Optional
 
 class ReportRepository:
     def __init__(self, db_url: str, service_role_key: str):
@@ -173,3 +174,63 @@ class ReportRepository:
             storage_filename = f"file.{ext}"
             # delegate to CloudStorage (uses subfolder='source' by default)
             return storage.get_presigned_url(report_id, storage_filename, expires_in=expires_in)
+    
+    def get_account_id_by_username(self, username: str) -> str:
+        """
+        Look up the UUID primary key of an account by its username.
+
+        Raises:
+            ValueError: if username is empty/whitespace.
+            RuntimeError: if the username doesn't exist or on DB/API errors.
+        """
+        uname = (username or "").strip()
+        if not uname:
+            raise ValueError("username cannot be empty")
+
+        try:
+            resp = (
+                self.client.table("accounts")
+                .select("id")
+                .eq("username", uname)   # exact match; make 'username' UNIQUE in schema
+                .single()
+                .execute()
+            )
+            data = getattr(resp, "data", None) or {}
+            account_id: Optional[str] = data.get("id")
+            if not account_id:
+                raise RuntimeError(f"Username not found: {uname}")
+            return account_id
+        except APIError as e:
+            # Normalize PostgREST errors for upstream callers
+            raise RuntimeError(f"DB error while fetching account id for '{uname}': {getattr(e, 'message', str(e))}")
+
+    def username_exists(self, username: str) -> bool:
+        """
+        Check whether a given username exists in the accounts table.
+
+        Args:
+            username (str): The username to check.
+
+        Returns:
+            bool: True if the username exists, False otherwise.
+        """
+        uname = (username or "").strip()
+        if not uname:
+            return False
+
+        try:
+            resp = (
+                self.client.table("accounts")
+                .select("id")
+                .eq("username", uname)
+                .limit(1)
+                .execute()
+            )
+            data = getattr(resp, "data", None) or []
+            return len(data) > 0
+        except APIError as e:
+            # log or re-raise depending on your design
+            raise RuntimeError(
+                f"DB error while checking existence of username '{uname}': "
+                f"{getattr(e, 'message', str(e))}"
+            )

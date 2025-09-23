@@ -139,15 +139,6 @@ def get_context(query: str = Query(..., min_length=1)):
 @app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
 def chat(req: ChatRequest):
     try:
-        # keep scope synced if report scoping matters
-        if hasattr(chat_ai, "set_scope") and req.report_id:
-            try:
-                chat_ai.set_scope(
-                    account_id=os.getenv("SUPABASE_DEFAULT_ACCOUNT_ID", "default"),
-                    report_id=req.report_id
-                )
-            except Exception:
-                pass
         reply = chat_ai.chat(req.message, req.history or [])
         return ChatResponse(reply=reply)
     except Exception as e:

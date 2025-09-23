@@ -9,27 +9,38 @@ import gradio as gr
 
 from app.src.report_service import ReportService
 from app.src.chat_ai import ChatAI
+from app.src.report_repository import ReportRepository  # for username_exists check
 
+# ---------------------------
+# Helpers to create dependencies
+# ---------------------------
 
-# ---- boot singletons
-def boot():
-    load_dotenv(override=True)
-    account_id = os.getenv("SUPABASE_DEFAULT_ACCOUNT_ID", "default")
-    svc = ReportService()
-    chat = ChatAI(svc)
-    if hasattr(chat, "set_scope"):
-        try:
-            chat.set_scope(account_id=account_id, report_id=None)
-        except Exception:
-            pass
-    return svc, chat, account_id
+def _make_repo_from_env() -> ReportRepository:
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not supabase_url or not supabase_service_role_key:
+        raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment.")
+    return ReportRepository(supabase_url, supabase_service_role_key)
 
+def _display_label(filename: str, rid: str) -> str:
+    # keep labels unique even with duplicate filenames
+    return f"{filename} — {rid[:8]}"
 
-report_service, chat_ai, DEFAULT_ACCOUNT = boot()
+def _build_report_mapping(report_service: ReportService) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Returns (label->report_id mapping, radio_choices) for the CURRENT user/session
+    """
+    mapping: Dict[str, str] = {}
+    for filename, rid in list_reports(report_service):
+        label = _display_label(filename, rid)
+        mapping[label] = rid
+    return mapping, list(mapping.keys())
 
+# ---------------------------
+# Thin wrappers over ReportService (now passed via state)
+# ---------------------------
 
-# ---- helpers
-def list_reports() -> List[Tuple[str, str]]:
+def list_reports(report_service: ReportService) -> List[Tuple[str, str]]:
     """
     Returns [(filename_label, report_id)]
     """
@@ -48,8 +59,7 @@ def list_reports() -> List[Tuple[str, str]]:
         out.append((label, rid))
     return out
 
-
-def poll_status(report_id: str, max_wait_s=15, interval=1.0) -> str:
+def poll_status(report_service: ReportService, report_id: str, max_wait_s=15, interval=1.0) -> str:
     if not hasattr(report_service, "get_report_status"):
         return "Upload completed."
     end = time.time() + max_wait_s
@@ -69,36 +79,103 @@ def poll_status(report_id: str, max_wait_s=15, interval=1.0) -> str:
         time.sleep(interval)
     return last + " ⏳"
 
+# ---------------------------
+# Login / Logout flow
+# ---------------------------
 
-def _display_label(filename: str, rid: str) -> str:
-    # keep labels unique even with duplicate filenames
-    return f"{filename} — {rid[:8]}"
-
-
-def _build_report_mapping() -> Tuple[Dict[str, str], List[str]]:
+def on_login(username_input: Optional[str]):
     """
-    Returns (label->report_id mapping, radio_choices)
+    1) If username_input is blank -> proceed with None (ReportService default behavior)
+    2) If provided -> check existence via ReportRepository.username_exists
+    3) On success -> init ReportService/ChatAI and show main app
     """
-    mapping: Dict[str, str] = {}
-    for filename, rid in list_reports():
-        label = _display_label(filename, rid)
-        mapping[label] = rid
-    return mapping, list(mapping.keys())
+    # states to populate:
+    svc = None
+    chat = None
+    default_account = ""
+    mapping = {}
+    radio_choices = []
+    status_text = "Ready."
+    view_btn_update = gr.update(link=None)
 
+    try:
+        username = (username_input or "").strip() or None
+        if username is not None:
+            # verify username exists before constructing ReportService
+            repo = _make_repo_from_env()
+            if not hasattr(repo, "username_exists"):
+                return (
+                    gr.update(visible=True),   # login panel
+                    gr.update(visible=False),  # app panel
+                    "Server missing username_exists(). Please deploy the latest backend.",
+                    None, None, None, None, None, None
+                )
+            if not repo.username_exists(username):
+                return (
+                    gr.update(visible=True),   # stay on login
+                    gr.update(visible=False),
+                    f"❌ Username not found: {username}",
+                    None, None, None, None, None, None
+                )
 
-# ---- callbacks
-def on_mount():
-    mapping, choices = _build_report_mapping()
-    # Clear View button link by default
-    return mapping, gr.update(choices=choices, value=None), "Ready.", gr.update(link=None)
+        # Ok to proceed (username exists or is None)
+        svc = ReportService(username=username)  # creates user/session
+        chat = ChatAI(svc)
+        default_account = svc.user_id
 
+        # hydrate initial report list & view button
+        mapping, radio_choices = _build_report_mapping(svc)
+        status_text = "Ready."
+        view_btn_update = gr.update(link=None)
 
-def on_refresh():
-    mapping, choices = _build_report_mapping()
+        # SHOW app panel, HIDE login
+        return (
+            gr.update(visible=False),           # login panel
+            gr.update(visible=True),            # app panel
+            "",                                 # login status cleared
+            svc, chat, default_account, mapping,
+            gr.update(choices=radio_choices, value=None),
+            status_text,
+            view_btn_update
+        )
+    except Exception as e:
+        return (
+            gr.update(visible=True),
+            gr.update(visible=False),
+            f"Login error: {e}",
+            None, None, None, None, None, None
+        )
+
+def on_logout():
+    """
+    Clear session states and show the login screen again.
+    """
+    return (
+        gr.update(visible=True),   # login panel visible
+        gr.update(visible=False),  # app panel hidden
+        "",                        # login status cleared
+        None, None, "", {},        # state_service, state_chat_ai, DEFAULT_ACCOUNT, mapping
+        gr.update(choices=[], value=None),  # reports_radio
+        "Logged out.",
+        gr.update(link=None)
+    )
+
+# ---------------------------
+# App callbacks (now receive stateful svc/chat/default_account)
+# ---------------------------
+
+def on_refresh(state_service: ReportService):
+    mapping, choices = _build_report_mapping(state_service)
     return mapping, gr.update(choices=choices, value=None), gr.update(link=None)
 
-
-def on_upload(file_path: Optional[str], current_report_id: Optional[str], mapping: Dict[str, str]):
+def on_upload(
+    state_service: ReportService,
+    state_chat_ai: ChatAI,
+    state_default_account: str,
+    file_path: Optional[str],
+    current_report_id: Optional[str],
+    mapping: Dict[str, str],
+):
     """
     Gradio v4: File with type='filepath' yields a string path (or None).
     """
@@ -107,26 +184,26 @@ def on_upload(file_path: Optional[str], current_report_id: Optional[str], mappin
 
     p = Path(file_path)
     try:
-        rid, _url = report_service.upload_report(str(p))  # (report_id, presigned_url)
+        rid, _url = state_service.upload_report(str(p))  # (report_id, presigned_url)
     except Exception as e:
         return current_report_id or "", f"Upload failed: {e}", gr.update(), None, mapping, gr.update(link=None)
 
-    status = poll_status(rid, max_wait_s=20, interval=1.0)
+    status = poll_status(state_service, rid, max_wait_s=20, interval=1.0)
 
     # refresh mapping and select the just-uploaded report
-    new_mapping, choices = _build_report_mapping()
+    new_mapping, choices = _build_report_mapping(state_service)
     display_label = next((lbl for lbl, _rid in new_mapping.items() if _rid == rid), None)
 
     # set chat scope
-    if hasattr(chat_ai, "set_scope"):
+    if hasattr(state_chat_ai, "set_scope"):
         try:
-            chat_ai.set_scope(account_id=DEFAULT_ACCOUNT, report_id=rid)
+            state_chat_ai.set_scope(account_id=state_default_account, report_id=rid)
         except Exception:
             pass
 
     # prepare the View button link for single-click open
     try:
-        presigned = report_service.presigned_url(rid)
+        presigned = state_service.presigned_url(rid)
         view_btn_update = gr.update(link=presigned)
     except Exception:
         view_btn_update = gr.update(link=None)
@@ -134,8 +211,13 @@ def on_upload(file_path: Optional[str], current_report_id: Optional[str], mappin
     radio_update = gr.update(choices=choices, value=display_label)
     return rid, f"Report {rid} | {status}", radio_update, None, new_mapping, view_btn_update
 
-
-def on_pick_report(selected_label: Optional[str], mapping: Dict[str, str]):
+def on_pick_report(
+    state_service: ReportService,
+    state_chat_ai: ChatAI,
+    state_default_account: str,
+    selected_label: Optional[str],
+    mapping: Dict[str, str],
+):
     """
     When user selects a report in the radio list:
       - set active scope
@@ -144,9 +226,9 @@ def on_pick_report(selected_label: Optional[str], mapping: Dict[str, str]):
     rid = mapping.get(selected_label or "", None)
 
     # keep chat scope in sync
-    if hasattr(chat_ai, "set_scope"):
+    if hasattr(state_chat_ai, "set_scope"):
         try:
-            chat_ai.set_scope(account_id=DEFAULT_ACCOUNT, report_id=rid)
+            state_chat_ai.set_scope(account_id=state_default_account, report_id=rid)
         except Exception:
             pass
 
@@ -157,7 +239,7 @@ def on_pick_report(selected_label: Optional[str], mapping: Dict[str, str]):
 
     if rid:
         try:
-            url = report_service.presigned_url(rid)
+            url = state_service.presigned_url(rid)
             view_btn_update = gr.update(link=url)  # make View a native anchor
             status_msg += " — link ready."
         except Exception as e:
@@ -165,9 +247,11 @@ def on_pick_report(selected_label: Optional[str], mapping: Dict[str, str]):
 
     return status_msg, (rid or ""), view_btn_update
 
-
 def on_user_message(
-    message: str, history: List[List[str]], current_report_id: Optional[str]
+    state_chat_ai: ChatAI,
+    message: str,
+    history: List[List[str]],
+    current_report_id: Optional[str],
 ) -> Generator[Tuple[List[List[str]], List[List[str]]], None, None]:
     """
     Streaming UX with an in-chat typing indicator.
@@ -188,7 +272,7 @@ def on_user_message(
 
     def _worker():
         try:
-            result["reply"] = chat_ai.chat(message, history)
+            result["reply"] = state_chat_ai.chat(message, history)
         except Exception as e:
             result["error"] = str(e)
 
@@ -209,63 +293,115 @@ def on_user_message(
     hist[-1][1] = reply
     yield hist, hist
 
-
 def _clear_text():
     return ""
 
+# ---------------------------
+# UI
+# ---------------------------
 
-# ---- UI
+load_dotenv(override=True)
+
 with gr.Blocks(title="Report AI Workbench", theme="soft") as demo:
     gr.Markdown("### 📄 Report AI Workbench")
 
-    state_report_id = gr.State(value="")
-    state_reports_mapping = gr.State(value={})  # {display_label: report_id}
+    # Session States
+    state_service = gr.State(value=None)         # ReportService
+    state_chat_ai = gr.State(value=None)         # ChatAI
+    state_default_account = gr.State(value="")   # str
+    state_report_id = gr.State(value="")         # active report id
+    state_reports_mapping = gr.State(value={})   # {display_label: report_id}
 
-    with gr.Row():
-        with gr.Column(scale=1, min_width=320):
-            gr.Markdown("#### Upload & Manage")
-            file_in = gr.File(label="Upload PDF/Image", file_count="single", type="filepath")
-            btn_upload = gr.Button("Upload", variant="primary")
+    # -------- Login Panel --------
+    with gr.Group(visible=True) as login_panel:
+        gr.Markdown("#### Sign in")
+        username_tb = gr.Textbox(label="Username (leave blank to continue as default)", placeholder="e.g., rakibjahan", value="")
+        btn_login = gr.Button("Continue", variant="primary")
+        login_status = gr.Markdown("")
 
-            gr.Markdown("#### Reports")
-            reports_radio = gr.Radio(label="Available reports", choices=[], value=None, interactive=True)
+    # -------- Main App Panel (hidden until login) --------
+    with gr.Group(visible=False) as app_panel:
+        with gr.Row():
+            gr.Markdown("#### Upload & Manage", elem_id="left-col")
+            btn_logout = gr.Button("Logout", variant="secondary")
 
-            with gr.Row():
-                btn_refresh = gr.Button("Refresh list")
-                # View button becomes a native link when 'link' is set via updates
-                btn_view = gr.Button("View", variant="secondary")
+        with gr.Row():
+            with gr.Column(scale=1, min_width=320):
+                file_in = gr.File(label="Upload PDF/Image", file_count="single", type="filepath")
+                btn_upload = gr.Button("Upload", variant="primary")
 
-            status_lbl = gr.Markdown("Ready.")
+                gr.Markdown("#### Reports")
+                reports_radio = gr.Radio(label="Available reports", choices=[], value=None, interactive=True)
 
-        with gr.Column(scale=3):
-            gr.Markdown("#### Chat")
-            chatbox = gr.Chatbot(label="Chat with your reports", height=560)
-            txt = gr.Textbox(placeholder="Ask about this report (or all reports)…", label=None)
-            btn_send = gr.Button("Send", variant="primary")
+                with gr.Row():
+                    btn_refresh = gr.Button("Refresh list")
+                    # View button becomes a native link when 'link' is set via updates
+                    btn_view = gr.Button("View", variant="secondary")
 
-    # initial population
-    demo.load(on_mount, None, [state_reports_mapping, reports_radio, status_lbl, btn_view])
+                status_lbl = gr.Markdown("Ready.")
 
-    # upload: also primes the View button with the new report's presigned URL
+            with gr.Column(scale=3):
+                gr.Markdown("#### Chat")
+                chatbox = gr.Chatbot(label="Chat with your reports", height=560)
+                txt = gr.Textbox(placeholder="Ask about this report (or all reports)…", label=None)
+                btn_send = gr.Button("Send", variant="primary")
+
+    # ---- Login wiring
+    btn_login.click(
+        on_login,
+        inputs=[username_tb],
+        outputs=[
+            login_panel,             # show/hide login
+            app_panel,               # show/hide app
+            login_status,            # login error/success
+            state_service,           # ReportService instance
+            state_chat_ai,           # ChatAI instance
+            state_default_account,   # DEFAULT_ACCOUNT
+            state_reports_mapping,   # mapping
+            reports_radio,           # choices populated
+            status_lbl,              # status text
+            btn_view,                # clear link
+        ],
+    )
+
+    # ---- Logout wiring
+    btn_logout.click(
+        on_logout,
+        inputs=None,
+        outputs=[
+            login_panel,
+            app_panel,
+            login_status,
+            state_service,
+            state_chat_ai,
+            state_default_account,
+            state_reports_mapping,
+            reports_radio,
+            status_lbl,
+            btn_view,
+        ],
+    )
+
+    # ---- Upload: also primes the View button with the new report's presigned URL
     btn_upload.click(
         on_upload,
-        inputs=[file_in, state_report_id, state_reports_mapping],
+        inputs=[state_service, state_chat_ai, state_default_account, file_in, state_report_id, state_reports_mapping],
         outputs=[state_report_id, status_lbl, reports_radio, file_in, state_reports_mapping, btn_view],
     )
 
-    # refresh list (clears the View link)
-    btn_refresh.click(on_refresh, None, [state_reports_mapping, reports_radio, btn_view])
+    # ---- refresh list (clears the View link)
+    btn_refresh.click(on_refresh, [state_service], [state_reports_mapping, reports_radio, btn_view])
 
-    # change selection -> set scope + set View button link
+    # ---- change selection -> set scope + set View button link
     reports_radio.change(
         on_pick_report,
-        [reports_radio, state_reports_mapping],
+        [state_service, state_chat_ai, state_default_account, reports_radio, state_reports_mapping],
         [status_lbl, state_report_id, btn_view],
     )
 
-    # chat (generator so user msg appears first) with built-in typing animation
-    txt.submit(on_user_message, [txt, chatbox, state_report_id], [chatbox, chatbox], queue=True)
-    btn_send.click(on_user_message, [txt, chatbox, state_report_id], [chatbox, chatbox], queue=True)
+    # ---- chat (generator so user msg appears first) with built-in typing animation
+    txt.submit(on_user_message, [state_chat_ai, txt, chatbox, state_report_id], [chatbox, chatbox], queue=True)
+    btn_send.click(on_user_message, [state_chat_ai, txt, chatbox, state_report_id], [chatbox, chatbox], queue=True)
 
     # clear input after send
     txt.submit(_clear_text, None, [txt])

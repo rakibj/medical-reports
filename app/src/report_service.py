@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 import uuid
 from pathlib import Path
 from app.src.cloud_storage import CloudStorage
@@ -10,26 +10,30 @@ from app.src.text_embedder import TextEmbedder
 import logging
 
 class ReportService:
-    def __init__(self):
+    def __init__(self, username: Optional[str] = None):
         endpoint_url=os.getenv("B2_ENDPOINT_URL")
         aws_access_key_id=os.getenv("B2_KEY_ID")
         aws_secret_access_key=os.getenv("B2_APP_KEY")
         bucket_name = os.getenv("B2_BUCKET_NAME")
-        user_id   = os.getenv("B2_USER_ID")
+
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        self.database = ReportRepository(self.supabase_url, self.supabase_service_role_key)
+        self.text_embedder = TextEmbedder()
+
+        self.username = "rakibjahan" if username is None else username
+        
+        self.user_id   = self.database.get_account_id_by_username(self.username)
+        self.supabase_default_account_id = self.database.get_account_id_by_username(self.username)
 
         self.cloud_storage = CloudStorage(
             endpoint_url=endpoint_url,
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
-            user_id=user_id,
+            user_id=self.user_id,
             bucket_name=bucket_name,
         )
 
-        self.supabase_url = os.getenv("SUPABASE_URL")
-        self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        self.supabase_default_account_id = os.getenv("SUPABASE_DEFAULT_ACCOUNT_ID")
-        self.database = ReportRepository(self.supabase_url, self.supabase_service_role_key)
-        self.text_embedder = TextEmbedder()
 
         if not logging.getLogger().handlers:
             logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -81,3 +85,6 @@ class ReportService:
             fname = r.get("filename", "")
             logging.info("• id=%s | created_at=%s | filename=%s", rid, created, fname)
         return reports
+    
+    def username_exists(self, username: str) -> bool:
+        return self.database.username_exists(username)
