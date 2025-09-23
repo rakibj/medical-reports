@@ -29,7 +29,8 @@ COPY . .
 EXPOSE 8080
 
 # Env for cloud platforms (they usually inject $PORT)
-ENV PORT=8080  # harmless default for local
+# harmless default for local
+ENV PORT=8080  
 
 # Run server
 CMD ["uv", "run", "uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "$PORT"]
