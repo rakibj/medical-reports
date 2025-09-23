@@ -1,8 +1,5 @@
 from dotenv import load_dotenv
 from app.src.report_service import ReportService
-from app.src.chat_ai import ChatAI
-from app.src.text_embedder import TextEmbedder
-import gradio as gr
 
 def main():
     # Load environment variables from .env file in the current directory

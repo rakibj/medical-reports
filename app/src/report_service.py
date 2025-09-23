@@ -1,16 +1,7 @@
-from dotenv import load_dotenv
-import os, re, math
-from typing import List, Tuple, Dict, Optional
+import os
+from typing import List, Dict
 import uuid
 from pathlib import Path
-import mimetypes
-from supabase import create_client, Client
-from postgrest import APIError 
-import base64
-from openai import OpenAI
-from pdf2image import convert_from_path
-from PIL import Image
-import pypdfium2 as pdfium
 from app.src.cloud_storage import CloudStorage
 from app.src.report_repository import ReportRepository
 from app.src.utils.files import infer_content_type, infer_extension

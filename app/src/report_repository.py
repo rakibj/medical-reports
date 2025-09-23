@@ -1,7 +1,6 @@
 from supabase import create_client, Client
 from postgrest import APIError 
-import base64
-import mimetypes  # ← NEW
+import mimetypes 
 from typing import List, Tuple, Dict, Optional, Any
 from app.src.text_embedder import TextEmbedder
 

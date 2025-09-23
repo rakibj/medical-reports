@@ -1,20 +1,13 @@
 from typing import Annotated, TypedDict, List
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from dotenv import load_dotenv
-from IPython.display import display, Markdown, Image
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents import Tool
-import json
 import uuid
-import random
-import gradio as gr
-from app.src.report_service import ReportService
 
 
 class ChatAI:
