@@ -88,63 +88,68 @@ def on_login(username_input: Optional[str]):
     1) If username_input is blank -> proceed with None (ReportService default behavior)
     2) If provided -> check existence via ReportRepository.username_exists
     3) On success -> init ReportService/ChatAI and show main app
+    Always returns exactly 10 outputs (to match Gradio wiring).
     """
-    # states to populate:
-    svc = None
-    chat = None
-    default_account = ""
-    mapping = {}
-    radio_choices = []
-    status_text = "Ready."
-    view_btn_update = gr.update(link=None)
-
     try:
         username = (username_input or "").strip() or None
+
+        # check if username exists
         if username is not None:
-            # verify username exists before constructing ReportService
             repo = _make_repo_from_env()
             if not hasattr(repo, "username_exists"):
                 return (
-                    gr.update(visible=True),   # login panel
-                    gr.update(visible=False),  # app panel
+                    gr.update(visible=True),    # login panel
+                    gr.update(visible=False),   # app panel
                     "Server missing username_exists(). Please deploy the latest backend.",
-                    None, None, None, None, None, None
+                    None, None, "", {},         # svc, chat, default_account, mapping
+                    gr.update(choices=[], value=None),  # reports_radio
+                    "Error",                    # status_lbl
+                    gr.update(link=None),       # btn_view
                 )
             if not repo.username_exists(username):
                 return (
-                    gr.update(visible=True),   # stay on login
+                    gr.update(visible=True),
                     gr.update(visible=False),
                     f"❌ Username not found: {username}",
-                    None, None, None, None, None, None
+                    None, None, "", {},
+                    gr.update(choices=[], value=None),
+                    "Error",
+                    gr.update(link=None),
                 )
 
-        # Ok to proceed (username exists or is None)
-        svc = ReportService(username=username)  # creates user/session
+        # ok to proceed
+        svc = ReportService(username=username)
         chat = ChatAI(svc)
         default_account = svc.user_id
 
-        # hydrate initial report list & view button
         mapping, radio_choices = _build_report_mapping(svc)
         status_text = "Ready."
         view_btn_update = gr.update(link=None)
 
-        # SHOW app panel, HIDE login
         return (
-            gr.update(visible=False),           # login panel
-            gr.update(visible=True),            # app panel
-            "",                                 # login status cleared
-            svc, chat, default_account, mapping,
-            gr.update(choices=radio_choices, value=None),
-            status_text,
-            view_btn_update
+            gr.update(visible=False),          # hide login
+            gr.update(visible=True),           # show app
+            "",                                # clear login status
+            svc,                               # state_service
+            chat,                              # state_chat_ai
+            default_account,                   # state_default_account
+            mapping,                           # state_reports_mapping
+            gr.update(choices=radio_choices, value=None),  # reports_radio
+            status_text,                       # status_lbl
+            view_btn_update,                   # btn_view
         )
+
     except Exception as e:
         return (
             gr.update(visible=True),
             gr.update(visible=False),
             f"Login error: {e}",
-            None, None, None, None, None, None
+            None, None, "", {},
+            gr.update(choices=[], value=None),
+            "Error",
+            gr.update(link=None),
         )
+
 
 def on_logout():
     """
@@ -274,7 +279,8 @@ def on_user_message(
         try:
             result["reply"] = state_chat_ai.chat(message, history)
         except Exception as e:
-            result["error"] = str(e)
+            print("Chat error:", repr(e))
+            result["error"] = "Something went wrong while looking up your data. Please try again."
 
     th = threading.Thread(target=_worker, daemon=True)
     th.start()

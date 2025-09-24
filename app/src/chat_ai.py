@@ -4,11 +4,23 @@ from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver  
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents import Tool
 import uuid
+import os
+import psycopg
+from psycopg.rows import dict_row
 
+_DB_URL = os.getenv("SUPABASE_DB_URL")
+
+if _DB_URL:
+    _conn = psycopg.connect(_DB_URL, autocommit=True, row_factory=dict_row, prepare_threshold=0)
+    _CHECKPOINTER = PostgresSaver(_conn)
+    _CHECKPOINTER.setup()  
+else:
+    _CHECKPOINTER = MemorySaver()
 
 class ChatAI:
     def __init__(self, report_service):
@@ -86,8 +98,21 @@ class ChatAI:
         graph_builder.add_edge("tools", "advisor")
         graph_builder.add_edge("advisor", END)
 
-        memory = MemorySaver()
-        self.graph = graph_builder.compile(checkpointer=memory)
+
+        # db_url = os.getenv("SUPABASE_DB_URL")
+        # if db_url is None:
+        #     self.checkpointer = MemorySaver()
+        # else:
+        #     conn = psycopg.connect(
+        #         db_url,
+        #         autocommit=True,
+        #         row_factory=dict_row,
+        #         prepare_threshold=0,        # <- key line
+        #     )
+        #     self.checkpointer = PostgresSaver(conn)
+            #self.checkpointer.setup()
+
+        self.graph = graph_builder.compile(checkpointer=_CHECKPOINTER)
         self.config = {"configurable": {"thread_id": self.make_thread_id()}}
 
     def search_medical_documents(self, query: str) -> str:

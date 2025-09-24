@@ -18,6 +18,7 @@ class ReportService:
 
         self.supabase_url = os.getenv("SUPABASE_URL")
         self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
         self.database = ReportRepository(self.supabase_url, self.supabase_service_role_key)
         self.text_embedder = TextEmbedder()
 

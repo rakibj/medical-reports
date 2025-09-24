@@ -88,6 +88,7 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[List[str]]] = None
     report_id: Optional[str] = None
+    thread_id: Optional[str] = None 
 
 class ChatResponse(BaseModel):
     reply: str
@@ -198,8 +199,20 @@ def chat(
 ):
     svc = _service_for(username)
     chat_ai = _chat_for(svc)
+
+    # (optional) if you support scoping by report, do it here:
+    if req.report_id and hasattr(chat_ai, "set_scope"):
+        try:
+            chat_ai.set_scope(account_id=svc.user_id, report_id=req.report_id)
+        except Exception:
+            pass
+
     try:
-        reply = chat_ai.chat(req.message, req.history or [])
+        reply = chat_ai.chat(
+            req.message,
+            req.history or [],
+            thread_id=req.thread_id,    # <-- forward client-generated thread id
+        )
         return ChatResponse(reply=reply)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
