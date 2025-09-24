@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import uuid
 
 # reuse your existing services
 from app.src.report_service import ReportService
@@ -92,6 +93,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    thread_id: Optional[str] = None 
 
 class UsernameCheckResponse(BaseModel):
     exists: bool
@@ -193,26 +195,19 @@ def get_context(
 
 # Optional: if you want chat from the browser via API
 @app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_api_key)])
-def chat(
-    req: ChatRequest,
-    username: str = Query(..., min_length=1),
-):
+def chat(req: ChatRequest, username: str = Query(..., min_length=1)):
     svc = _service_for(username)
     chat_ai = _chat_for(svc)
 
-    # (optional) if you support scoping by report, do it here:
+    # ensure we have a thread id from the very first call
+    thread_id = req.thread_id or str(uuid.uuid4())
+
+    # keep (optional) report scoping
     if req.report_id and hasattr(chat_ai, "set_scope"):
         try:
             chat_ai.set_scope(account_id=svc.user_id, report_id=req.report_id)
         except Exception:
             pass
 
-    try:
-        reply = chat_ai.chat(
-            req.message,
-            req.history or [],
-            thread_id=req.thread_id,    # <-- forward client-generated thread id
-        )
-        return ChatResponse(reply=reply)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    reply = chat_ai.chat(req.message, req.history or [], thread_id=thread_id)
+    return ChatResponse(reply=reply, thread_id=thread_id)
