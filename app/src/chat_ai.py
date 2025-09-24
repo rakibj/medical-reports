@@ -13,14 +13,25 @@ import os
 import psycopg
 from psycopg.rows import dict_row
 
-_DB_URL = os.getenv("SUPABASE_DB_URL")
+_CHECKPOINTER = None  # lazy, so import never blocks/fails
 
-if _DB_URL:
-    # recommended way: let PostgresSaver manage its own connections
-    _CHECKPOINTER = PostgresSaver.from_conn_string(_DB_URL)
-    _CHECKPOINTER.setup()
-else:
-    _CHECKPOINTER = MemorySaver()
+def get_checkpointer():
+    global _CHECKPOINTER
+    if _CHECKPOINTER is not None:
+        return _CHECKPOINTER
+    db_url = os.getenv("SUPABASE_DB_URL")
+    if not db_url:
+        _CHECKPOINTER = MemorySaver()
+        return _CHECKPOINTER
+    try:
+        cp = PostgresSaver.from_conn_string(db_url)  # manages its own connections
+        cp.setup()
+        _CHECKPOINTER = cp
+    except Exception as e:
+        # Don’t crash the process at import/startup; log and fall back.
+        print("Checkpoint init failed, using MemorySaver:", repr(e))
+        _CHECKPOINTER = MemorySaver()
+    return _CHECKPOINTER
 
 
 class ChatAI:
@@ -119,7 +130,7 @@ class ChatAI:
         #     self.checkpointer = PostgresSaver(conn)
             #self.checkpointer.setup()
 
-        self.graph = graph_builder.compile(checkpointer=_CHECKPOINTER)
+        self.graph = graph_builder.compile(checkpointer=get_checkpointer())
         self.config = {"configurable": {"thread_id": self.make_thread_id()}}
 
     def search_medical_documents(self, query: str) -> str:
