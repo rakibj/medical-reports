@@ -16,11 +16,12 @@ from psycopg.rows import dict_row
 _DB_URL = os.getenv("SUPABASE_DB_URL")
 
 if _DB_URL:
-    _conn = psycopg.connect(_DB_URL, autocommit=True, row_factory=dict_row, prepare_threshold=0)
-    _CHECKPOINTER = PostgresSaver(_conn)
-    _CHECKPOINTER.setup()  
+    # recommended way: let PostgresSaver manage its own connections
+    _CHECKPOINTER = PostgresSaver.from_conn_string(_DB_URL)
+    _CHECKPOINTER.setup()
 else:
     _CHECKPOINTER = MemorySaver()
+
 
 class ChatAI:
     def __init__(self, report_service):
