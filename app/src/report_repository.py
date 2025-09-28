@@ -1,3 +1,4 @@
+# report_repository.py
 from supabase import create_client, Client
 from postgrest import APIError 
 import mimetypes 
@@ -72,46 +73,71 @@ class ReportRepository:
         ).execute()
         return resp.data
     
-    def get_context_from_embeddings(self,
+    def get_context_from_embeddings(
+    self,
     account_id: str,
     query: str,
     report_id: Optional[str] = None,
     *,
-    k: int = 5,
-    sim_threshold: float = 0.10,     # tweak: 0.30 (weak) · 0.50 (medium) · 0.70 (strong)
+    k: int = 100,                    # cast a wider net
+    sim_threshold: float = -1.0,    # ✅ allow anything; tune later to 0.05–0.15
     max_snippet: int = 1200,
-    max_total_chars: int = 4000,     # safety cap on total context
-    min_hits: int = 1,               # require at least this many hits above threshold
-    ) -> str:
+    max_total_chars: int = 4000,
+    min_hits: int = 1,
+) -> str:
+        
+        print(f"🔍 Searching for top {k} chunks matching query: {query}")
         rows: List[Dict] = self.search_chunks(account_id, query, k=k, report_id=report_id) or []
 
-        # keep only rows with similarity >= threshold
+        # Nothing came back from the DB at all
+        if not rows:
+            return "No indexed passages found for this account. Try uploading a report or re-indexing."
+
+        # Keep rows above threshold (cosine similarity can be low/negative)
         good: List[Dict] = []
         for r in rows:
-            try:
-                sim = float(r.get("similarity", 0.0))
-            except (TypeError, ValueError):
-                sim = 0.0
-            if sim >= sim_threshold:
-                good.append(r)
+            # try:
+            #     sim = float(r.get("similarity", 0.0))
+            # except (TypeError, ValueError):
+            #     sim = 0.0
+            # if sim >= sim_threshold:
+            good.append(r)
 
-        if len(good) < min_hits:
-            return ""  # << no usable context
+        # If filter eliminated everything, fall back to top N raw rows
+        # if len(good) < min_hits:
+        #     preview = []
+        #     # for r in rows[:3]:
+        #     #     sim = float(r.get("similarity", 0.0) or 0.0)
+        #     #     page = r.get("page_no") or "?"
+        #     #     snippet = (r.get("content") or "").strip()[:300]
+        #     #     if len((r.get("content") or "")) > 300:
+        #     #         snippet += " …"
+        #     #     preview.append(f"[page {page} | sim {sim:.3f}] {snippet}")
+        #     for r in rows:
+        #         snippet = (r.get("content") or "")
+        #         preview.append(f"[page {page} | sim {sim:.3f}] {snippet}")
+        #     return "No highly similar passages yet. Top candidates:\n" + "\n".join(preview)
 
+        # Build the final context
         parts: List[str] = []
         for r in good:
-            sim = float(r.get("similarity", 0.0))
-            page = r.get("page_no")
-            page_str = str(page) if page is not None else "?"
+            sim = float(r.get("similarity", 0.0) or 0.0)
+            page = r.get("page_no") or "?"
             snippet = (r.get("content") or "").strip()
-            if len(snippet) > max_snippet:
-                snippet = snippet[:max_snippet] + " …"
-            parts.append(f"[page {page_str} | sim {sim:.3f}] {snippet}")
+            # if len(snippet) > max_snippet:
+            #     snippet = snippet[:max_snippet] + " …"
+            snippet = snippet[:max_snippet] + " …"
+            parts.append(f"[page {page} | sim {sim:.3f}] {snippet}")
 
         context = "\n\n".join(parts)
-        if len(context) > max_total_chars:
-            context = context[:max_total_chars] + " …"
-        return context or "No relevant information found in the documents."
+        # if len(context) > max_total_chars:
+        #     context = context[:max_total_chars] + " …"
+
+        # if len(context) > max_total_chars:
+        context = context[:max_total_chars] + " …"
+        return context
+
+
     
     def list_reports(self, account_id: str) -> List[Dict[str, str]]:
         """
@@ -234,3 +260,27 @@ class ReportRepository:
                 f"DB error while checking existence of username '{uname}': "
                 f"{getattr(e, 'message', str(e))}"
             )
+        
+    def get_all_text(
+    self,
+    account_id: str,
+    report_id: str | None = None,
+) -> str:
+        """
+        Return all 'content' fields from report_chunks for the given account.
+        If report_id is provided, restrict to that report only.
+        """
+        q = (
+            self.client.table("report_chunks")
+            .select("content")
+            .eq("account_id", account_id)
+        )
+        if report_id:
+            q = q.eq("report_id", report_id)
+
+        rows = q.execute().data or []
+        texts = [(r.get("content") or "").strip() for r in rows if r.get("content")]
+        return "\n\n".join(texts)
+
+
+    

@@ -1,3 +1,4 @@
+# chat_ai.py
 from typing import Annotated, TypedDict, List
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -35,21 +36,27 @@ def get_checkpointer():
 
 
 class ChatAI:
+    def search_medical_documents(self, query: str) -> str:
+        """Useful when you need to look for information in the provided medical documents"""
+        return self.report_service.get_context(query)
+    
     def __init__(self, report_service):
         self.report_service = report_service
 
         tool_search_docs = Tool(
             name="search_medical_documents",
-            description="Useful for when you need to look for information in the medical documents provided"
-                        "The input to this tool should be a fully formed question.",
+            description="Use when you need for information about the patient",
             func=self.search_medical_documents
         )
         tools = [tool_search_docs]
 
         llm = ChatOpenAI(model="gpt-4o-mini")
-        llm = llm.bind_tools(tools=tools)
+        # llm = llm.bind_tools(tools=tools)
+
+        # You have secure tool access to the patient’s medical reports via `search_medical_documents`. 
         system_prompt = """
-        You are a Medical Health Advisor for the user. You have secure tool access to the patient’s medical reports via `search_medical_documents`. Your job is to provide patient-specific guidance grounded in those reports, clearly separated from general medical information.
+        You are a Medical Health Advisor for the user. 
+        Your job is to provide patient-specific guidance grounded in those reports, clearly separated from general medical information.
 
         PRINCIPLES
         1) Patient-first, evidence-based: Prefer facts from the patient’s documents over general knowledge. Never fabricate.
@@ -60,32 +67,9 @@ class ChatAI:
         6) Safety: If the user asks for urgent-symptom guidance (e.g., chest pain, stroke signs, severe bleeding, trouble breathing), advise seeking emergency care immediately.
         7) Conversation: Keep answers concise and user-friendly. After every response, leave hints to continue the converasion. For example, “Would you like me to...?” 
 
-        TOOL USE — `search_medical_documents`
-        - Use this tool to retrieve relevant reports. Form focused queries from the user’s request plus known patient context (e.g., “operative note appendectomy”, “MRI brain report”, “discharge summary”, “medication list”, date ranges).
-        - When results return, read titles, types, dates, and content/extracts. Normalize dates (DD Mon YYYY). If multiple documents conflict, prefer:
-        (a) Final over preliminary
-        (b) More recent over older
-        (c) Operative/Discharge notes over consult recommendations
-        - Infer status examples:
-        • If there is an “Operative Note” or “Procedure Note” dated after a “Surgery Recommendation,” conclude the surgery was completed on the operative note’s date.
-        • If there is a scheduled/provisional note but no operative/discharge note and later clinic notes mention “post-op” or “s/p,” infer completed; otherwise treat as planned/pending and flag uncertainty.
-        • For medications, use the latest “Medication List,” “Discharge Medications,” or a recent clinic note. If conflicting, mark as uncertain and advise verification.
-        - Name/DOB mismatches: If documents appear to be for a different individual, ask a brief clarification before revealing details.
-        - Critical thinking with documentation: When labs, imaging, or plans don’t align (e.g., “start anticoagulation” with platelets 40k; “awaiting surgery” but an operative note exists), highlight the discrepancy and suggest specific, respectful questions for the clinician.
-
-        WHEN NOT TO USE THE TOOL
-        - Simple general education questions with no patient-specific angle. If the user implies they want patient-specific info, use the tool.
-
         ANSWER FORMAT
-        1) **Brief answer:** One-paragraph, user-friendly summary tailored to the patient.
-        2) **What I checked:** Bulleted list of the specific documents used, each as: *Title • Date • Type*.
-        3) **Details that matter:** Key patient-specific facts (diagnoses, procedure dates, critical values, instructions) in bullets.
-        4) **Possible considerations (gentle challenges):** Optional bullets that use careful language to flag discrepancies, alternative interpretations, or questions to bring to the clinician. Use hedged phrasing such as:
-        - “I think this may suggest {X}; however, the note states {Y}. Please ask the clinician whether {Z} applies.”
-        - “This dose looks higher than common ranges for {condition}; since the doctor prescribed it, ask them to confirm the target and monitoring plan.”
-        - “Imaging on {date} reports {finding}; the plan mentions {different finding}. Worth clarifying which result guided the plan.”
-        5) **Gaps / next steps:** Any uncertainties, missing documents, or recommended verifications, plus “talk to your clinician” guidance. Never provide a diagnosis or alter medications.
-
+        Answer naturally like in a conversation. Keep answers human-like and friendly.
+        
         STYLE
         - Plain language, minimal jargon (explain if used).
         - Use metric and conventional units when relevant.
@@ -100,6 +84,13 @@ class ChatAI:
         - If the tool returns nothing relevant, state that directly, offer general education only if appropriate, and suggest which document to upload or find (e.g., “discharge summary,” “operative note,” “latest medication list”).
         """
 
+        system_prompt += f"""
+        Here's the context about the patient’s medical documents you have so far:
+        {self.report_service.get_all_text()}
+        """
+
+        print("all text: ", self.report_service.get_all_text())
+
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=system_prompt),
             MessagesPlaceholder(variable_name="messages")
@@ -110,11 +101,11 @@ class ChatAI:
         graph_builder = StateGraph(self.State)
 
         graph_builder.add_node("advisor", self.advisor_node)
-        graph_builder.add_node("tools", ToolNode(tools=tools))
+        # graph_builder.add_node("tools", ToolNode(tools=tools))
 
         graph_builder.add_edge(START, "advisor")
-        graph_builder.add_conditional_edges("advisor", tools_condition, "tools")
-        graph_builder.add_edge("tools", "advisor")
+        # graph_builder.add_conditional_edges("advisor", tools_condition, "tools")
+        # graph_builder.add_edge("tools", "advisor")
         graph_builder.add_edge("advisor", END)
 
 
@@ -134,10 +125,7 @@ class ChatAI:
         self.graph = graph_builder.compile(checkpointer=get_checkpointer())
         self.config = {"configurable": {"thread_id": self.make_thread_id()}}
 
-    def search_medical_documents(self, query: str) -> str:
-        """Useful when you need to look for information in the provided medical documents.
-        Input should be a fully formed question."""
-        return self.report_service.get_context(query)
+    
     
     def chat(self, user_message, history, thread_id: str = None) -> str:
         if thread_id is not None:

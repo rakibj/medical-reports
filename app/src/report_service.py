@@ -1,3 +1,4 @@
+# report_service.py
 import os
 from typing import List, Dict, Optional
 import uuid
@@ -61,6 +62,10 @@ class ReportService:
         context = self.database.get_context_from_embeddings(self.supabase_default_account_id,query)
         return context
     
+    def get_all_text(self) -> str:
+        texts = self.database.get_all_text(self.supabase_default_account_id)
+        return texts
+    
 
     def presigned_url(self, report_id: str, expires_in: int = 900) -> str:
         return self.database.get_presigned_url_for_report(
@@ -89,3 +94,4 @@ class ReportService:
     
     def username_exists(self, username: str) -> bool:
         return self.database.username_exists(username)
+    

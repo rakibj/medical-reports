@@ -7,14 +7,14 @@ def main():
     load_dotenv(override=True)
 
     # Initialize services
-    report_service = ReportService()
+    report_service = ReportService('lubaba')
     chat_ai = ChatAI(report_service)
 
     # Upload report
     # report_id = report_service.upload_report("resources/sample_report.jpg")
     
     # Query report
-    # query = "Which universities in Finland offer scholarships for Master's programs in AI and Game Development?"
+    # query = "Gynaecology"
     # context = report_service.get_context(query)
     # print("Context:\n", context)
     # gr.ChatInterface(fn=chat_ai.chat, title="Report AI Assistant").launch()

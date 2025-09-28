@@ -1,3 +1,4 @@
+# text_embedder.py
 from typing import List
 from openai import OpenAI
 from pathlib import Path
